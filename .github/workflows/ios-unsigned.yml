@@ -1,12 +1,23 @@
-name: KUBIKORN_MARKET iOS unsigned IPA (macOS 26)
+name: KUBIKORN_MARKET iOS unsigned IPA
 
 on:
   workflow_dispatch:
+    inputs:
+      runner:
+        description: macOS runner pool (Intel is selected by default)
+        type: choice
+        required: true
+        default: macos-26-intel
+        options:
+          - macos-26-intel
+          - macos-26
+          - macos-15-intel
 
 permissions:
   contents: read
 
-# Keep only one iOS build queued/running for this branch.
+# Replacing a pending build with the newest manual build prevents a stale
+# queued run from blocking the current request.
 concurrency:
   group: kubikorn-market-ios-${{ github.ref }}
   cancel-in-progress: true
@@ -14,34 +25,48 @@ concurrency:
 jobs:
   build-ios:
     name: Build unsigned iPhone IPA
-    # Switch from the busy macos-15-intel pool to the macOS 26 Apple Silicon pool.
-    runs-on: macos-26
-    timeout-minutes: 40
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 45
 
     steps:
       - name: Check out source
         uses: actions/checkout@v4
 
-      - name: Show runner and validate project
+      - name: Inspect runner and validate Xcode project
         shell: bash
         run: |
           set -euo pipefail
-          echo "Runner architecture: $(uname -m)"
-          sw_vers
-          xcodebuild -version
-          test -d ios/KUBIKORN_MARKET.xcodeproj || { echo '::error::Missing ios/KUBIKORN_MARKET.xcodeproj'; exit 1; }
-          test -f ios/KUBIKORN_MARKET.xcodeproj/project.pbxproj || { echo '::error::Missing project.pbxproj'; exit 1; }
-          test -f ios/KUBIKORN_MARKET/KUBIKORN_MARKET/Info.plist || test -f ios/KUBIKORN_MARKET/Info.plist || { echo '::error::Missing app Info.plist'; exit 1; }
-          test -f ios/KUBIKORN_MARKET/AppDelegate.swift || { echo '::error::Missing AppDelegate.swift'; exit 1; }
-          test -f ios/KUBIKORN_MARKET/www/index.html || { echo '::error::Missing bundled web/index.html'; exit 1; }
-          echo '[INFO] Xcode schemes and targets:'
-          xcodebuild -list -project ios/KUBIKORN_MARKET.xcodeproj
+          mkdir -p build/diagnostics
+          {
+            echo "Runner label: ${{ inputs.runner }}"
+            echo "Architecture: $(uname -m)"
+            echo "macOS: $(sw_vers -productVersion)"
+            echo "Xcode path: $(xcode-select -p)"
+            xcodebuild -version
+          } 2>&1 | tee build/runner-info.log
+
+          PROJECT="ios/KUBIKORN_MARKET.xcodeproj"
+          APP_DIR="ios/KUBIKORN_MARKET"
+          test -d "$PROJECT" || { echo "::error::Missing $PROJECT"; find ios -maxdepth 5 -print || true; exit 1; }
+          test -f "$PROJECT/project.pbxproj" || { echo '::error::Missing project.pbxproj'; exit 1; }
+          test -f "$APP_DIR/AppDelegate.swift" || { echo '::error::Missing AppDelegate.swift'; exit 1; }
+          test -f "$APP_DIR/Info.plist" || { echo '::error::Missing Info.plist'; exit 1; }
+          test -f "$APP_DIR/www/index.html" || { echo '::error::Missing bundled web/index.html'; exit 1; }
+
+          echo '[INFO] Listing Xcode targets and schemes...'
+          xcodebuild -list -project "$PROJECT" 2>&1 | tee build/xcode-project-validation.log
+          grep -q 'KUBIKORN_MARKET' build/xcode-project-validation.log
+          echo '[OK] Native iOS project and scheme are present.'
 
       - name: Build for a real iPhone (not Simulator)
         shell: bash
         run: |
-          set -o pipefail
-          mkdir -p build/DerivedData build/logs
+          set -uo pipefail
+          mkdir -p build
+          RESULT_BUNDLE="$PWD/build/KUBIKORN_MARKET.xcresult"
+          rm -rf "$RESULT_BUNDLE"
+
+          echo "[INFO] Building KUBIKORN_MARKET on runner ${{ inputs.runner }} ($(uname -m))."
           set +e
           xcodebuild \
             -project ios/KUBIKORN_MARKET.xcodeproj \
@@ -49,39 +74,62 @@ jobs:
             -configuration Release \
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
-            -derivedDataPath build/DerivedData \
-            -resultBundlePath build/KUBIKORN_MARKET.xcresult \
+            -derivedDataPath "$PWD/build/DerivedData" \
+            -resultBundlePath "$RESULT_BUNDLE" \
             -jobs 2 \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_IDENTITY='' \
             build 2>&1 | tee build/xcodebuild.log
-          result=${PIPESTATUS[0]}
+          BUILD_STATUS=${PIPESTATUS[0]}
           set -e
-          if [[ "$result" -ne 0 ]]; then
-            echo "::error::xcodebuild failed with exit code $result"
-            exit "$result"
+          echo "$BUILD_STATUS" > build/xcodebuild.exitcode
+          if [[ "$BUILD_STATUS" -ne 0 ]]; then
+            echo "::error::xcodebuild failed with exit code $BUILD_STATUS. Diagnostic bundle will be uploaded."
+            exit "$BUILD_STATUS"
           fi
+          echo '[OK] Xcode build completed.'
 
       - name: Package unsigned iPhone IPA
         shell: bash
         run: |
           set -euo pipefail
-          APP_PATH='build/DerivedData/Build/Products/Release-iphoneos/KUBIKORN_MARKET.app'
+          APP_PATH="build/DerivedData/Build/Products/Release-iphoneos/KUBIKORN_MARKET.app"
           if [[ ! -d "$APP_PATH" ]]; then
             echo '::error::Xcode did not produce KUBIKORN_MARKET.app'
-            find build/DerivedData/Build/Products -maxdepth 4 -print || true
+            find build/DerivedData/Build/Products -maxdepth 5 -print 2>/dev/null || true
             exit 1
           fi
           mkdir -p build/ipa/Payload dist
-          cp -R "$APP_PATH" build/ipa/Payload/KUBIKORN_MARKET.app
+          /usr/bin/ditto "$APP_PATH" build/ipa/Payload/KUBIKORN_MARKET.app
           (cd build/ipa && /usr/bin/zip -qry "$GITHUB_WORKSPACE/dist/KUBIKORN_MARKET-Unsigned.ipa" Payload)
           test -s dist/KUBIKORN_MARKET-Unsigned.ipa
-          /usr/bin/unzip -t dist/KUBIKORN_MARKET-Unsigned.ipa
-          echo '[OK] Unsigned IPA created.'
+          echo '[OK] Unsigned iPhone IPA created.'
           /usr/bin/du -h dist/KUBIKORN_MARKET-Unsigned.ipa
+          /usr/bin/unzip -t dist/KUBIKORN_MARKET-Unsigned.ipa
+
+      - name: Collect Xcode crash reports and result bundle
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p build/diagnostics
+          for REPORT_DIR in "$HOME/Library/Logs/DiagnosticReports" "/Library/Logs/DiagnosticReports"; do
+            if [[ -d "$REPORT_DIR" ]]; then
+              find "$REPORT_DIR" -maxdepth 1 -type f \
+                \( -iname '*xcodebuild*.crash' -o -iname '*xcbuild*.crash' -o -iname '*swift-frontend*.crash' \) \
+                -mmin -60 -exec cp -p {} build/diagnostics/ \; 2>/dev/null || true
+            fi
+          done
+          if [[ -d build/KUBIKORN_MARKET.xcresult ]]; then
+            /usr/bin/ditto -c -k --sequesterRsrc --keepParent \
+              build/KUBIKORN_MARKET.xcresult \
+              build/diagnostics/KUBIKORN_MARKET.xcresult.zip || true
+          fi
+          echo '[INFO] Diagnostic files:'
+          find build/diagnostics -maxdepth 2 -print || true
 
       - name: Upload unsigned iPhone IPA
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: KUBIKORN-MARKET-iOS-Unsigned-IPA
@@ -89,13 +137,14 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Upload Xcode diagnostics
+      - name: Upload Xcode build diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: KUBIKORN-MARKET-iOS-Diagnostics
+          name: KUBIKORN-MARKET-iOS-Build-Diagnostics
           path: |
-            build/xcodebuild.log
-            build/KUBIKORN_MARKET.xcresult
+            build/*.log
+            build/*.exitcode
+            build/diagnostics/**
           if-no-files-found: warn
           retention-days: 7
