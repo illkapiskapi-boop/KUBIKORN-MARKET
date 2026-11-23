@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#090511">
+  <meta name="color-scheme" content="dark">
+  <title>KUBIKORN_MARKET</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand-lockup">
+        <img src="kubikorn-app-icon.png" alt="Logo KUBIKORN_MARKET" class="brand-logo">
+        <div><div class="brand-name">KUBIKORN<span>_MARKET</span></div><div class="brand-tag">Kupuj · Sprzedawaj · Wygodnie</div></div>
+      </div>
+      <nav class="side-nav" aria-label="Nawigacja">
+        <button class="nav-btn active" data-view="home"><span>⌂</span>Główna</button>
+        <button class="nav-btn" data-view="categories"><span>▦</span>Kategorie</button>
+        <button class="nav-btn" data-view="favorites"><span>♡</span>Ulubione</button>
+        <button class="nav-btn" data-view="panel"><span>▱</span>Moje konto</button>
+        <button class="nav-btn" data-view="settings"><span>⚙</span>Ustawienia</button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="sidebar-promo"><div class="promo-crown">♛</div><strong>KUBIKORN_MARKET</strong><span>Twój sklep. Twój styl.</span></div>
+        <div class="connection" id="connectionState"><i></i><span>Tryb demonstracyjny</span></div>
+        <small>© 2026 KUBIKORN_MARKET</small>
+      </div>
+    </aside>
+
+    <main class="main-area">
+      <header class="topbar">
+        <button class="icon-btn mobile-menu" id="menuToggle" aria-label="Menu">☰</button>
+        <label class="search-box"><span>⌕</span><input id="searchInput" type="search" placeholder="Szukaj produktów…"><button id="searchButton" aria-label="Szukaj">⌕</button></label>
+        <div class="top-actions"><button class="icon-btn" id="refreshButton" title="Odśwież">↻</button><button class="account-pill" id="accountButton"><span class="account-avatar">♛</span><span id="accountLabel">Moje konto</span></button></div>
+      </header>
+
+      <div id="notice" class="notice hidden global-notice" role="status"></div>
+      <section class="content" id="content"></section>
+      <nav class="bottom-nav" aria-label="Dolna nawigacja">
+        <button class="bottom-btn active" data-view="home"><span>⌂</span>Główna</button>
+        <button class="bottom-btn" data-view="categories"><span>▦</span>Kategorie</button>
+        <button class="bottom-btn" data-view="favorites"><span>♡</span>Ulubione</button>
+        <button class="bottom-btn" data-view="panel"><span>♙</span>Konto</button>
+      </nav>
+    </main>
+  </div>
+
+  <div class="modal-backdrop hidden" id="modalBackdrop"><section class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle"><button class="modal-close" id="modalClose" aria-label="Zamknij">×</button><div id="modalBody"></div></section></div>
+  <div class="toast" id="toast" role="status"></div>
+  <script src="app.js"></script>
+</body>
+</html>
