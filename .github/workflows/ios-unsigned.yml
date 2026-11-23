@@ -1,23 +1,12 @@
-name: KUBIKORN_MARKET iOS unsigned IPA
+name: KUBIKORN_MARKET iOS unsigned IPA (stable Xcode 16.4)
 
 on:
   workflow_dispatch:
-    inputs:
-      runner:
-        description: macOS runner pool (Intel is selected by default)
-        type: choice
-        required: true
-        default: macos-26-intel
-        options:
-          - macos-26-intel
-          - macos-26
-          - macos-15-intel
 
 permissions:
   contents: read
 
-# Replacing a pending build with the newest manual build prevents a stale
-# queued run from blocking the current request.
+# Keep only one iOS build queued/running for this branch.
 concurrency:
   group: kubikorn-market-ios-${{ github.ref }}
   cancel-in-progress: true
@@ -25,48 +14,64 @@ concurrency:
 jobs:
   build-ios:
     name: Build unsigned iPhone IPA
-    runs-on: ${{ inputs.runner }}
+    # macos-15 is GitHub's Apple Silicon runner image and includes Xcode 16.4.
+    # Pin Xcode 16.4 to avoid the Xcode 26.6 xcodebuild SIGSEGV (exit 139)
+    # observed on the macos-26 Intel image.
+    runs-on: macos-15
     timeout-minutes: 45
 
     steps:
       - name: Check out source
         uses: actions/checkout@v4
 
-      - name: Inspect runner and validate Xcode project
+      - name: Select stable Xcode 16.4 and validate project
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p build/diagnostics
+          XCODE_DEVELOPER_DIR="/Applications/Xcode_16.4.app/Contents/Developer"
+          if [[ ! -d "$XCODE_DEVELOPER_DIR" ]]; then
+            echo "::error::Xcode 16.4 was not found at $XCODE_DEVELOPER_DIR"
+            ls -1 /Applications | grep -i Xcode || true
+            exit 1
+          fi
+          sudo xcode-select --switch "$XCODE_DEVELOPER_DIR"
+          export DEVELOPER_DIR="$XCODE_DEVELOPER_DIR"
           {
-            echo "Runner label: ${{ inputs.runner }}"
-            echo "Architecture: $(uname -m)"
+            echo "Runner architecture: $(uname -m)"
             echo "macOS: $(sw_vers -productVersion)"
-            echo "Xcode path: $(xcode-select -p)"
+            echo "Developer dir: $(xcode-select -p)"
             xcodebuild -version
+            echo "iPhoneOS SDK: $(xcrun --sdk iphoneos --show-sdk-version)"
           } 2>&1 | tee build/runner-info.log
 
           PROJECT="ios/KUBIKORN_MARKET.xcodeproj"
           APP_DIR="ios/KUBIKORN_MARKET"
           test -d "$PROJECT" || { echo "::error::Missing $PROJECT"; find ios -maxdepth 5 -print || true; exit 1; }
           test -f "$PROJECT/project.pbxproj" || { echo '::error::Missing project.pbxproj'; exit 1; }
+          test -f "$PROJECT/xcshareddata/xcschemes/KUBIKORN_MARKET.xcscheme" || { echo '::error::Missing shared scheme'; exit 1; }
           test -f "$APP_DIR/AppDelegate.swift" || { echo '::error::Missing AppDelegate.swift'; exit 1; }
           test -f "$APP_DIR/Info.plist" || { echo '::error::Missing Info.plist'; exit 1; }
           test -f "$APP_DIR/www/index.html" || { echo '::error::Missing bundled web/index.html'; exit 1; }
-
-          echo '[INFO] Listing Xcode targets and schemes...'
+          test -d "$APP_DIR/Assets.xcassets" || { echo '::error::Missing Assets.xcassets'; exit 1; }
+          plutil -lint "$PROJECT/project.pbxproj"
+          plutil -lint "$APP_DIR/Info.plist"
+          python3 -m json.tool "$APP_DIR/Assets.xcassets/AppIcon.appiconset/Contents.json" >/dev/null
+          echo '[INFO] Xcode project targets and schemes:'
           xcodebuild -list -project "$PROJECT" 2>&1 | tee build/xcode-project-validation.log
           grep -q 'KUBIKORN_MARKET' build/xcode-project-validation.log
-          echo '[OK] Native iOS project and scheme are present.'
+          echo '[OK] Project, Info.plist, assets and shared scheme validated.'
 
       - name: Build for a real iPhone (not Simulator)
         shell: bash
         run: |
           set -uo pipefail
+          export DEVELOPER_DIR="/Applications/Xcode_16.4.app/Contents/Developer"
           mkdir -p build
           RESULT_BUNDLE="$PWD/build/KUBIKORN_MARKET.xcresult"
           rm -rf "$RESULT_BUNDLE"
 
-          echo "[INFO] Building KUBIKORN_MARKET on runner ${{ inputs.runner }} ($(uname -m))."
+          echo '[INFO] Building KUBIKORN_MARKET with Xcode 16.4 / iOS 18.5 SDK.'
           set +e
           xcodebuild \
             -project ios/KUBIKORN_MARKET.xcodeproj \
@@ -76,7 +81,7 @@ jobs:
             -destination 'generic/platform=iOS' \
             -derivedDataPath "$PWD/build/DerivedData" \
             -resultBundlePath "$RESULT_BUNDLE" \
-            -jobs 2 \
+            -jobs 1 \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_IDENTITY='' \
@@ -85,7 +90,7 @@ jobs:
           set -e
           echo "$BUILD_STATUS" > build/xcodebuild.exitcode
           if [[ "$BUILD_STATUS" -ne 0 ]]; then
-            echo "::error::xcodebuild failed with exit code $BUILD_STATUS. Diagnostic bundle will be uploaded."
+            echo "::error::xcodebuild failed with exit code $BUILD_STATUS. Diagnostics will be uploaded."
             exit "$BUILD_STATUS"
           fi
           echo '[OK] Xcode build completed.'
@@ -104,9 +109,9 @@ jobs:
           /usr/bin/ditto "$APP_PATH" build/ipa/Payload/KUBIKORN_MARKET.app
           (cd build/ipa && /usr/bin/zip -qry "$GITHUB_WORKSPACE/dist/KUBIKORN_MARKET-Unsigned.ipa" Payload)
           test -s dist/KUBIKORN_MARKET-Unsigned.ipa
+          /usr/bin/unzip -t dist/KUBIKORN_MARKET-Unsigned.ipa
           echo '[OK] Unsigned iPhone IPA created.'
           /usr/bin/du -h dist/KUBIKORN_MARKET-Unsigned.ipa
-          /usr/bin/unzip -t dist/KUBIKORN_MARKET-Unsigned.ipa
 
       - name: Collect Xcode crash reports and result bundle
         if: always()
@@ -117,7 +122,7 @@ jobs:
             if [[ -d "$REPORT_DIR" ]]; then
               find "$REPORT_DIR" -maxdepth 1 -type f \
                 \( -iname '*xcodebuild*.crash' -o -iname '*xcbuild*.crash' -o -iname '*swift-frontend*.crash' \) \
-                -mmin -60 -exec cp -p {} build/diagnostics/ \; 2>/dev/null || true
+                -mmin -90 -exec cp -p {} build/diagnostics/ \; 2>/dev/null || true
             fi
           done
           if [[ -d build/KUBIKORN_MARKET.xcresult ]]; then
