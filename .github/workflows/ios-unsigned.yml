@@ -21,63 +21,69 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
-      - name: Inspect and validate Xcode project
+      - name: Inspect project and ensure shared Xcode scheme
         shell: bash
         run: |
           set -euo pipefail
           echo "Runner: $(uname -m) / $(sw_vers -productVersion)"
           xcodebuild -version
-          echo "[INFO] Files under ios/:"
-          find ios -maxdepth 6 -type f -print | sort | sed -n '1,160p'
 
           PROJECT="ios/KUBIKORN_MARKET.xcodeproj"
           PBXPROJ="$PROJECT/project.pbxproj"
           APP_DIR="ios/KUBIKORN_MARKET"
+          SCHEME_DIR="$PROJECT/xcshareddata/xcschemes"
+          SCHEME_FILE="$SCHEME_DIR/KUBIKORN_MARKET.xcscheme"
 
-          if [[ ! -d "$PROJECT" ]]; then
-            echo "::error::Missing $PROJECT"
-            echo "[DEBUG] Xcode projects found:"
-            find ios -maxdepth 6 -name '*.xcodeproj' -print || true
-            exit 1
+          test -d "$PROJECT" || { echo "::error::Missing $PROJECT"; find ios -maxdepth 5 -print || true; exit 1; }
+          test -f "$PBXPROJ" || { echo "::error::Missing $PBXPROJ"; exit 1; }
+          test -f "$APP_DIR/AppDelegate.swift" || { echo "::error::Missing $APP_DIR/AppDelegate.swift"; exit 1; }
+          test -f "$APP_DIR/Info.plist" || { echo "::error::Missing $APP_DIR/Info.plist"; exit 1; }
+          test -f "$APP_DIR/www/index.html" || { echo "::error::Missing $APP_DIR/www/index.html"; exit 1; }
+
+          # The project target identifier is A50000000000000000000001 in project.pbxproj.
+          # Create a shared scheme when the uploaded project does not include one.
+          if [[ ! -f "$SCHEME_FILE" ]]; then
+            echo "[INFO] Shared scheme missing; creating KUBIKORN_MARKET.xcscheme."
+            mkdir -p "$SCHEME_DIR"
+            cat > "$SCHEME_FILE" <<'SCHEME'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <Scheme LastUpgradeVersion="1600" version="1.7">
+             <BuildAction parallelizeBuildables="YES" buildImplicitDependencies="YES">
+                <BuildActionEntries>
+                   <BuildActionEntry buildForTesting="YES" buildForRunning="YES" buildForProfiling="YES" buildForArchiving="YES" buildForAnalyzing="YES">
+                      <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="A50000000000000000000001" BuildableName="KUBIKORN_MARKET.app" BlueprintName="KUBIKORN_MARKET" ReferencedContainer="container:KUBIKORN_MARKET.xcodeproj"/>
+                   </BuildActionEntry>
+                </BuildActionEntries>
+             </BuildAction>
+             <TestAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.DebuggerFoundation.Launcher.LLDB" shouldUseLaunchSchemeArgsEnv="YES"/>
+             <LaunchAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.DebuggerFoundation.Launcher.LLDB" launchStyle="0" useCustomWorkingDirectory="NO" ignoresPersistentStateOnLaunch="NO" debugDocumentVersioning="YES" debugServiceExtension="internal" allowLocationSimulation="YES"/>
+             <ProfileAction buildConfiguration="Release" shouldUseLaunchSchemeArgsEnv="YES" savedToolIdentifier="" useCustomWorkingDirectory="NO" debugDocumentVersioning="YES"/>
+             <AnalyzeAction buildConfiguration="Debug"/>
+             <ArchiveAction buildConfiguration="Release" revealArchiveInOrganizer="YES"/>
+          </Scheme>
+          SCHEME
           fi
-          if [[ ! -f "$PBXPROJ" ]]; then
-            echo "::error::Missing $PBXPROJ"
-            find "$PROJECT" -maxdepth 6 -type f -print || true
-            exit 1
-          fi
 
-          for required in             "$APP_DIR/AppDelegate.swift"             "$APP_DIR/Info.plist"             "$APP_DIR/www/index.html"; do
-            if [[ ! -f "$required" ]]; then
-              echo "::error::Missing required iOS file: $required"
-              find "$APP_DIR" -maxdepth 6 -type f -print 2>/dev/null | sort || true
-              exit 1
-            fi
-          done
-
-          SCHEME="$PROJECT/xcshareddata/xcschemes/KUBIKORN_MARKET.xcscheme"
-          if [[ -f "$SCHEME" ]]; then
-            echo "[INFO] Shared scheme found: $SCHEME"
-          else
-            echo "[WARN] Shared scheme is absent; building the native target directly instead."
-          fi
-
-          echo "[INFO] Asking Xcode to parse the project and list targets..."
+          echo "[INFO] Validating Xcode project and schemes..."
           mkdir -p build
           xcodebuild -list -project "$PROJECT" 2>&1 | tee build/xcode-project-validation.log
           grep -q 'KUBIKORN_MARKET' build/xcode-project-validation.log || {
-            echo "::error::Xcode did not report a KUBIKORN_MARKET target."
+            echo "::error::Xcode did not find target/scheme KUBIKORN_MARKET."
             exit 1
           }
-          echo '[OK] Xcode project is readable and target KUBIKORN_MARKET is present.'
+          echo "[OK] Project and shared scheme are ready."
 
       - name: Build for a real iPhone (not Simulator)
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p build
+          # IMPORTANT: -derivedDataPath must be used with -scheme.
+          # xcodebuild -target plus -derivedDataPath triggers Xcode error 64.
+          set -o pipefail
           xcodebuild \
             -project ios/KUBIKORN_MARKET.xcodeproj \
-            -target KUBIKORN_MARKET \
+            -scheme KUBIKORN_MARKET \
             -configuration Release \
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
@@ -93,8 +99,8 @@ jobs:
           set -euo pipefail
           APP_PATH='build/DerivedData/Build/Products/Release-iphoneos/KUBIKORN_MARKET.app'
           if [[ ! -d "$APP_PATH" ]]; then
-            echo '::error::Xcode did not produce KUBIKORN_MARKET.app'
-            find build/DerivedData/Build/Products -maxdepth 4 -print 2>/dev/null || true
+            echo "::error::Xcode did not produce KUBIKORN_MARKET.app"
+            find build/DerivedData/Build/Products -maxdepth 5 -print 2>/dev/null || true
             exit 1
           fi
           mkdir -p build/ipa/Payload dist
