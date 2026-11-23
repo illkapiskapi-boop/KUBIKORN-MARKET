@@ -1,0 +1,50 @@
+name: KUBIKORN_MARKET Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'mobile/**'
+      - '.github/workflows/android-apk.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Flutter stable
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.50.1'
+          channel: stable
+          cache: true
+      - name: Generate Android platform folder
+        working-directory: mobile
+        run: flutter create --platforms=android --org pl.kubikorn --project-name kubikorn_market .
+      - name: Patch app display name and permissions
+        run: python3 scripts/patch_platforms.py
+      - name: Get dependencies
+        working-directory: mobile
+        run: flutter pub get
+      - name: Generate app icons
+        working-directory: mobile
+        run: dart run flutter_launcher_icons
+      - name: Build release APK
+        working-directory: mobile
+        env:
+          MARKET_API_URL: ${{ vars.MARKET_API_URL }}
+        run: |
+          if [ -n "$MARKET_API_URL" ]; then
+            flutter build apk --release --dart-define=API_BASE_URL="$MARKET_API_URL"
+          else
+            flutter build apk --release
+          fi
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: KUBIKORN-MARKET-Android-APK
+          path: mobile/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 14

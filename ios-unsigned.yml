@@ -1,0 +1,73 @@
+name: KUBIKORN_MARKET iOS unsigned IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'ios/**'
+      - 'web/**'
+      - '.github/workflows/ios-unsigned.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-ios:
+    name: Build unsigned iPhone IPA
+    runs-on: macos-15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Build for real iPhone (not Simulator)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          xcodebuild \
+            -project ios/KUBIKORN_MARKET.xcodeproj \
+            -scheme KUBIKORN_MARKET \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_IDENTITY='' \
+            build 2>&1 | tee build/xcodebuild.log
+
+      - name: Package unsigned IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_PATH='build/DerivedData/Build/Products/Release-iphoneos/KUBIKORN_MARKET.app'
+          if [[ ! -d "$APP_PATH" ]]; then
+            echo '::error::Xcode did not produce KUBIKORN_MARKET.app'
+            exit 1
+          fi
+          mkdir -p build/ipa/Payload dist
+          cp -R "$APP_PATH" build/ipa/Payload/KUBIKORN_MARKET.app
+          (cd build/ipa && /usr/bin/zip -qry "$GITHUB_WORKSPACE/dist/KUBIKORN_MARKET-Unsigned.ipa" Payload)
+          test -s dist/KUBIKORN_MARKET-Unsigned.ipa
+          echo '[OK] Unsigned iPhone IPA created.'
+
+      - name: Upload unsigned iPhone IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: KUBIKORN-MARKET-iOS-Unsigned-IPA
+          path: dist/KUBIKORN_MARKET-Unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Xcode log if build fails
+        if: failure() && hashFiles('build/xcodebuild.log') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: KUBIKORN-MARKET-iOS-Xcode-Log
+          path: build/xcodebuild.log
+          if-no-files-found: warn
+          retention-days: 7
