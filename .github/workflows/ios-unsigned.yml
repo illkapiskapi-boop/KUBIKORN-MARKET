@@ -1,4 +1,4 @@
-name: KUBIKORN_MARKET iOS unsigned IPA
+name: KUBIKORN_MARKET iOS unsigned IPA (Intel runner)
 
 on:
   workflow_dispatch:
@@ -15,7 +15,9 @@ permissions:
 jobs:
   build-ios:
     name: Build unsigned iPhone IPA
-    runs-on: macos-15
+    # Use the Intel macOS pool instead of the default macos-15 ARM64 pool.
+    # This can avoid long ARM runner queues during high-demand periods.
+    runs-on: macos-15-intel
     timeout-minutes: 30
     steps:
       - name: Check out source
@@ -25,6 +27,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          echo "Runner: $(uname -m) / $(sw_vers -productVersion)"
           xcodebuild -version
           test -d ios/KUBIKORN_MARKET.xcodeproj
           test -f ios/KUBIKORN_MARKET.xcodeproj/project.pbxproj
@@ -33,12 +36,14 @@ jobs:
           test -f ios/KUBIKORN_MARKET/AppDelegate.swift
           test -f ios/KUBIKORN_MARKET/www/index.html
           echo '[OK] Native iOS project structure is present.'
+          echo '[INFO] Available Xcode schemes:'
           xcodebuild -list -project ios/KUBIKORN_MARKET.xcodeproj
 
       - name: Build for real iPhone (not Simulator)
         shell: bash
         run: |
-          set -o pipefail
+          set -euo pipefail
+          echo '[INFO] Starting device build on Intel macOS runner.'
           mkdir -p build
           xcodebuild \
             -project ios/KUBIKORN_MARKET.xcodeproj \
@@ -67,6 +72,8 @@ jobs:
           test -s dist/KUBIKORN_MARKET-Unsigned.ipa
           /usr/bin/unzip -l dist/KUBIKORN_MARKET-Unsigned.ipa
           echo '[OK] Unsigned iPhone IPA created.'
+          echo '[INFO] IPA size:'
+          /usr/bin/du -h dist/KUBIKORN_MARKET-Unsigned.ipa
 
       - name: Upload unsigned iPhone IPA
         uses: actions/upload-artifact@v4
