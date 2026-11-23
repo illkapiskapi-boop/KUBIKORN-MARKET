@@ -1,0 +1,33 @@
+KUBIKORN_MARKET 1.1.4 — КАК ЗАГРУЗИТЬ ПОЛНЫЙ ПРОЕКТ В GITHUB
+
+ВАЖНО: сейчас в репозитории отсутствуют папки android/, ios/, server/ и web/.
+Одного файла .github/workflows/ios-unsigned.yml недостаточно — Xcode не может
+собрать приложение без исходников.
+
+Правильный корень репозитория должен содержать:
+  .github/workflows/ios-unsigned.yml
+  android/
+  ios/KUBIKORN_MARKET.xcodeproj/
+  ios/KUBIKORN_MARKET/
+  server/
+  web/
+  build-apk.bat
+  build-ipa.bat
+  README.md
+
+Лучший способ загрузить:
+1. Установить GitHub Desktop и войти в GitHub.
+2. File -> Clone repository -> illkapiskapi-boop/KUBIKORN-MARKET.
+3. Repository -> Show in Explorer.
+4. Распаковать архив и открыть папку KUBIKORN_MARKET-1.1.4-REPOSITORY.
+5. Скопировать ВСЁ её содержимое в папку локального клона репозитория.
+   Согласиться на объединение папок; заменять старые workflow-файлы.
+6. Убедиться, что скрытая папка .github тоже скопирована.
+7. В GitHub Desktop выполнить Commit to main, затем Push origin.
+
+После отправки открой вкладку Code репозитория: должны быть видны папки
+android, ios, server, web и .github.
+
+Только после загрузки исходников запускай build-ipa.bat.
+
+Не загружай секреты .env, пароли, сертификаты или приватные ключи в GitHub.
